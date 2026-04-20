@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>暑さ指数(WBGT) 掲示板システム</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { 
+            font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .tab-active { background-color: #3b82f6; color: white; border-color: #3b82f6; }
+        .tab-inactive { background-color: #f3f4f6; color: #4b5563; border-color: #d1d5db; }
+        
+        .loc-active { background-color: white; color: #dc2626; font-weight: 900; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .loc-inactive { background-color: rgba(255,255,255,0.2); color: white; font-weight: 500; }
+
+        .bg-danger { background-color: #ef4444; color: white; }
+        .bg-severe { background-color: #f97316; color: black; }
+        .bg-warning { background-color: #fde047; color: black; }
+        .bg-caution { background-color: #a3e635; color: black; }
+        .bg-safe { background-color: #67e8f9; color: black; }
+
+        .badge-api-future { background-color: #94a3b8; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; }
+        .badge-api-past { background-color: #64748b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; }
+        .badge-actual { background-color: #2563eb; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
+        
+        /* 変更：ハードコードを廃止し、Flexboxによる可変高さに依存させる */
+        .board-fixed-height { flex-grow: 1; min-height: 0; display: flex; flex-direction: column; }
+        .board-container { display: flex; height: 100%; background: white; border: 4px solid #1f2937; border-radius: 12px; overflow: hidden; }
+        .header-column { width: 120px; background: #1f2937; color: white; flex-shrink: 0; display: flex; flex-direction: column; }
+        .data-viewport { flex-grow: 1; overflow-x: auto; display: flex; }
+        .data-column { min-width: 150px; border-right: 2px solid #e5e7eb; display: flex; flex-direction: column; }
+        
+        .cell { display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #e5e7eb; padding: 2px; text-align: center; }
+        .header-cell { display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #374151; font-weight: 900; font-size: 1.1rem; background: #374151; text-align: center; }
+        
+        .flex-row-type { flex: 0.6; }
+        .flex-row-main { flex: 1; }
+
+        .cell-wbgt { font-size: 2.5rem; font-weight: 900; }
+        .cell-guidance { font-size: 1.3rem; font-weight: 900; line-height: 1.2; }
+        .cell-time { font-size: 1.6rem; font-weight: 900; }
+
+        /* 変更：高さを親コンテナ（main）に追従させ、内部でのみスクロールを許可 */
+        .scrollable-view { height: 100%; overflow-y: auto; padding-bottom: 20px; }
+        .forecast-scroll::-webkit-scrollbar { height: 6px; }
+        .forecast-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <div id="terms-modal" class="fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm hidden">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[95vh] animate-in zoom-in-95 duration-300">
+            <div class="bg-red-700 p-5 text-white flex items-center gap-3 shrink-0">
+                <i data-lucide="shield-alert" class="w-8 h-8"></i>
+                <h2 class="text-xl md:text-2xl font-black tracking-wider">【重要】本システムの運用ルール</h2>
+            </div>
+            <div class="p-6 md:p-8 overflow-y-auto flex-grow text-gray-800 space-y-6">
+                <p class="font-black text-lg text-gray-900 border-b-2 border-gray-200 pb-2">データの性質を理解した上で、以下の2段構えの運用を推奨します。</p>
+                <div class="border-2 border-gray-300 rounded-xl overflow-hidden shadow-sm">
+                    <table class="w-full text-sm text-left">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="p-3 border-b border-r border-gray-300 w-1/4 font-black text-center">項目</th>
+                                <th class="p-3 border-b border-r border-gray-300 w-1/4 font-black text-center">役割</th>
+                                <th class="p-3 border-b border-gray-300 font-black text-center">活用方法</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            <tr>
+                                <td class="p-4 border-r border-gray-300 font-black text-indigo-700 bg-indigo-50/50 text-center">API予測値</td>
+                                <td class="p-4 border-r border-gray-300 font-black text-center text-indigo-900">「警戒・準備」<br>の指標</td>
+                                <td class="p-4 text-sm font-bold leading-relaxed text-gray-700">前日や当日の朝に、1日の活動スケジュールを組むための「傾向」として利用する。</td>
+                            </tr>
+                            <tr>
+                                <td class="p-4 border-r border-gray-300 font-black text-blue-700 bg-blue-50/50 text-center">現場実測値</td>
+                                <td class="p-4 border-r border-gray-300 font-black text-red-600 text-center text-lg">「実行・中止」<br>の決定打</td>
+                                <td class="p-4 text-sm font-black leading-relaxed text-gray-900 bg-red-50/30">命に関わる最終的な判断は、APIの推定値ではなく、必ず<span class="text-red-600 border-b-2 border-red-600">WBGT計の数値（実測値）</span>で行う。</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="bg-red-50 border-l-8 border-red-600 p-5 rounded-r-xl shadow-inner">
+                    <h3 class="text-red-800 font-black text-lg mb-3 flex items-center gap-2">
+                        <i data-lucide="alert-triangle" class="w-6 h-6"></i> 警告（安全配慮義務について）
+                    </h3>
+                    <p class="text-base leading-relaxed font-bold text-gray-900 mb-4">
+                        「APIが『ほぼ安全』と言っているから」という理由で、現場のWBGT計が危険域にあるのに活動を続行するような運用は、組織として<span class="text-red-600 font-black bg-white px-1 rounded">極めて高いリスク（安全配慮義務違反）</span>を背負うことになります。
+                    </p>
+                    <p class="text-base leading-relaxed font-bold text-gray-900">
+                        掲示板下部に記載した<span class="text-red-600 font-black">「ハイブリッド運用の重要性」</span>は、単なる注釈ではなく、<span class="underline decoration-red-600 decoration-2">法的・安全上の防衛線</span>であることを再認識してください。
+                    </p>
+                </div>
+            </div>
+            <div class="p-5 bg-gray-50 border-t-2 border-gray-200 shrink-0">
+                <button onclick="acceptTerms()" class="w-full bg-red-600 hover:bg-red-700 text-white font-black py-5 rounded-xl shadow-xl active:scale-95 transition-all text-xl flex items-center justify-center gap-3">
+                    <i data-lucide="check-square"></i> 理解して利用を開始する
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <header class="bg-red-600 shadow-xl px-4 py-3 flex flex-row items-center justify-between sticky top-0 z-50 gap-2 border-b-4 border-red-700 shrink-0 text-center">
+        <h1 class="text-xl md:text-2xl font-black text-white flex items-center gap-2 shrink-0 text-center">
+            <i data-lucide="thermometer-sun" class="text-white w-6 h-6 md:w-8 md:h-8"></i>
+            暑さ指数掲示板
+        </h1>
+
+        <div class="flex bg-red-800/40 p-1 rounded-lg gap-1 shrink-0 text-center">
+            <button onclick="switchGlobalLocation('校庭')" id="header-loc-校庭" class="py-1.5 px-3 md:px-5 rounded flex items-center gap-1.5 text-sm md:text-base transition-all loc-active">校庭</button>
+            <button onclick="switchGlobalLocation('体育館')" id="header-loc-体育館" class="py-1.5 px-3 md:px-5 rounded flex items-center gap-1.5 text-sm md:text-base transition-all loc-inactive">体育館</button>
+        </div>
+
+        <div class="flex bg-red-700 p-1 rounded-lg shadow-inner shrink-0 text-center">
+            <button onclick="switchTab('board')" id="tab-board" class="tab-active px-3 md:px-5 py-1.5 text-sm md:text-base font-bold border rounded transition-all">掲示板</button>
+            <button onclick="switchTab('api')" id="tab-api" class="tab-inactive px-3 md:px-5 py-1.5 text-sm md:text-base font-bold border rounded transition-all">予測取得</button>
+            <button onclick="switchTab('input')" id="tab-input" class="tab-inactive px-3 md:px-5 py-1.5 text-sm md:text-base font-bold border rounded transition-all">実測入力</button>
+        </div>
+    </header>
+
+    <!-- 変更：親コンテナ(main)をoverflow-hiddenにし、子要素(各ビュー)にスクロールを委譲する -->
+    <main class="flex-grow p-2 md:p-4 max-w-full mx-auto w-full relative overflow-hidden flex flex-col">
+
+        <div id="view-auth" class="hidden flex flex-col items-center justify-center h-full bg-white rounded-lg shadow-md border-t-4 border-red-500 py-10 text-center">
+            <i data-lucide="shield-alert" class="w-12 h-12 text-red-500 mb-4 mx-auto"></i>
+            <h2 class="text-xl font-bold mb-6 text-gray-800">管理ロック解除</h2>
+            <div class="flex flex-col items-center gap-4 w-full max-w-xs px-4 mx-auto">
+                <input type="password" id="passcode-input" autocomplete="off" class="border-2 border-gray-300 rounded-lg p-3 text-center text-3xl tracking-[1em] w-full shadow-inner outline-none focus:border-blue-500" placeholder="****" onkeypress="if(event.key === 'Enter') verifyPasscode()">
+                <button onclick="verifyPasscode()" class="bg-blue-600 text-white font-black py-4 rounded-lg w-full shadow-lg active:scale-95 transition-transform">ロック解除</button>
+                <p id="auth-error" class="text-red-600 font-bold mt-2 hidden">パスコード不一致</p>
+            </div>
+        </div>
+
+        <div id="view-board" class="space-y-3 h-full animate-in fade-in duration-300 flex flex-col">
+            <div class="flex items-center justify-between bg-white px-4 py-2 rounded-lg shadow-sm border shrink-0">
+                <button onclick="changeBoardDate(-1)" class="p-1 hover:bg-gray-100 rounded-full transition-colors text-gray-600"><i data-lucide="chevron-left" class="w-6 h-6"></i></button>
+                <div class="flex items-center gap-4 text-center mx-auto">
+                    <h3 id="board-date-display" class="text-xl md:text-3xl font-black text-gray-800">日付</h3>
+                    <button onclick="resetBoardDateToToday()" class="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs font-bold hover:bg-gray-200">今日</button>
+                </div>
+                <button onclick="changeBoardDate(1)" class="p-1 hover:bg-gray-100 rounded-full transition-colors text-gray-600"><i data-lucide="chevron-right" class="w-8 h-8"></i></button>
+            </div>
+
+            <div class="board-fixed-height">
+                <div class="board-container">
+                    <div class="header-column">
+                        <div class="header-cell flex-row-type">区分</div>
+                        <div class="header-cell flex-row-main">時間</div>
+                        <div class="header-cell flex-row-main">天気</div>
+                        <div class="header-cell flex-row-main text-cyan-300 font-black">WBGT</div>
+                        <div class="header-cell flex-row-main">指針</div>
+                        <div class="header-cell flex-row-main text-sm uppercase text-center">気温(℃)</div>
+                        <div class="header-cell flex-row-main text-sm uppercase border-b-0 text-center">湿度(%)</div>
+                    </div>
+                    <div id="board-data-viewport" class="data-viewport text-center"></div>
+                </div>
+            </div>
+            
+            <div class="bg-blue-50 border-l-4 border-blue-600 p-2 rounded shadow-sm shrink-0 flex items-center justify-between">
+                <p class="text-[10px] text-gray-600 font-bold ml-2">活動時間 (08:00 - 17:00) を表示</p>
+                <p class="text-xs text-blue-900 font-black flex items-center gap-1">
+                    <i data-lucide="info" class="w-4 h-4"></i> ハイブリッド運用の重要性：最終判断は必ず「現場実測値」で。
+                </p>
+            </div>
+        </div>
+
+        <div id="view-api" class="hidden scrollable-view max-w-4xl mx-auto space-y-4">
+            <div class="bg-white p-6 rounded-lg shadow-md border-t-4 border-indigo-500">
+                
+                <div id="api-location-fixed" class="flex flex-col md:flex-row justify-between items-center bg-indigo-50 p-5 rounded-xl border border-indigo-100 mb-6 gap-6 text-left">
+                    <div class="flex items-center gap-3">
+                        <div class="bg-indigo-600 text-white p-2 rounded-lg shadow-sm"><i data-lucide="map-pin"></i></div>
+                        <div>
+                            <p class="text-[10px] font-black text-indigo-400 uppercase tracking-widest text-left">設定拠点</p>
+                            <h2 id="api-target-display" class="text-xl font-black text-indigo-900 leading-tight text-left">拠点未設定</h2>
+                        </div>
+                    </div>
+                    <div class="flex-grow flex flex-col gap-1 w-full md:w-auto text-left">
+                        <label class="text-[10px] font-bold text-gray-500 ml-1 uppercase">予報日を選択 (最大16日先)</label>
+                        <div class="flex gap-2">
+                            <input type="date" id="api-fetch-date" class="flex-1 border-2 border-indigo-200 rounded-lg p-2 font-bold focus:border-indigo-500 outline-none text-center bg-white">
+                            <button onclick="fetchWeatherData(false)" id="btn-fetch" class="bg-indigo-600 text-white px-6 rounded-lg font-black shadow hover:bg-indigo-700 active:scale-95 transition-all whitespace-nowrap">
+                                予報を取得
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex gap-2 shrink-0">
+                        <button onclick="showLocationEditor()" class="flex items-center gap-1.5 px-4 py-2.5 text-indigo-600 border-2 border-indigo-200 bg-white rounded-lg hover:bg-indigo-50 transition-all shadow-sm">
+                            <i data-lucide="settings" class="w-4 h-4"></i>
+                            <span class="text-sm font-black">拠点設定</span>
+                        </button>
+                        <button onclick="lockEditor()" class="flex items-center gap-1.5 px-3 py-2.5 text-red-600 border-2 border-red-100 bg-white rounded-lg hover:bg-red-50 transition-all shadow-sm">
+                            <i data-lucide="lock" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="api-location-editor" class="hidden p-6 bg-white border-2 border-indigo-500 rounded-xl mb-6 shadow-xl text-left animate-in zoom-in duration-200">
+                    <h3 class="font-black text-gray-800 mb-4 flex items-center gap-2"><i data-lucide="map-pinned"></i> 拠点の新規登録・変更</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 text-left">
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[10px] font-bold text-gray-400 ml-1 text-left">都道府県</label>
+                            <select id="api-pref" onchange="loadCities()" class="border-2 border-gray-100 rounded-lg p-3 font-bold bg-gray-50 focus:border-blue-500 outline-none"></select>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[10px] font-bold text-gray-400 ml-1 text-left">市区町村</label>
+                            <select id="api-city" onchange="updateCoordinates()" class="border-2 border-gray-100 rounded-lg p-3 font-bold bg-gray-50 focus:border-blue-500 outline-none disabled:opacity-50 text-left" disabled></select>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="registerNewLocation()" id="btn-register-loc" class="flex-1 bg-indigo-600 text-white font-black py-4 rounded-xl shadow-lg disabled:bg-gray-200 transition-all" disabled>この場所を基準地点として保存</button>
+                        <button onclick="hideLocationEditor()" class="bg-gray-200 text-gray-600 font-bold px-6 rounded-xl text-center">閉じる</button>
+                    </div>
+                    <input type="hidden" id="api-lat"><input type="hidden" id="api-lon">
+                </div>
+
+                <div id="api-result-area" class="hidden animate-in fade-in duration-500 text-center">
+                    <p class="text-sm font-bold text-green-600 bg-green-50 p-4 rounded-xl border border-green-200 shadow-sm flex items-center justify-center gap-2">
+                        <i data-lucide="check-circle-2" class="w-5 h-5"></i> 取得したデータは自動的に掲示板へ反映されています。
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-input" class="hidden scrollable-view space-y-4">
+            <div id="editor-screen" class="grid grid-cols-1 md:grid-cols-3 gap-4 mx-auto max-w-6xl">
+                <div class="bg-white p-6 rounded-lg shadow-md border-t-4 border-blue-500 text-left h-fit">
+                    <h2 class="text-lg font-bold mb-6 flex items-center gap-2 text-blue-700 text-left"><i data-lucide="clipboard-check" class="text-left"></i> <span id="input-form-title"></span>の実測登録</h2>
+                    <form id="data-form" class="space-y-6 text-left" onsubmit="handleFormSubmit(event)">
+                        <div class="grid grid-cols-2 gap-3 text-left">
+                            <input type="date" id="input-date" required class="border-2 border-gray-100 rounded-lg p-2 font-bold text-center bg-white text-left">
+                            <div class="flex gap-1 text-center">
+                                <select id="input-hour" class="flex-1 border-2 border-gray-100 rounded-lg p-2 font-bold focus:border-blue-500 text-center"></select>:<select id="input-minute" class="flex-1 border-2 border-gray-100 rounded-lg p-2 font-bold focus:border-blue-500 text-center"></select>
+                            </div>
+                        </div>
+                        <div class="bg-gray-50 border-2 border-gray-100 rounded-lg p-3 flex items-center gap-4">
+                            <label class="text-xs font-black text-gray-500 shrink-0">天気</label>
+                            <div class="flex-1 flex justify-between">
+                                <label class="cursor-pointer"><input type="radio" name="input-weather" value="☀️" checked class="hidden peer"><span class="text-3xl grayscale peer-checked:grayscale-0 peer-checked:bg-blue-100 peer-checked:ring-2 ring-blue-500 rounded-xl p-2 transition-all block">☀️</span></label>
+                                <label class="cursor-pointer"><input type="radio" name="input-weather" value="⛅" class="hidden peer"><span class="text-3xl grayscale peer-checked:grayscale-0 peer-checked:bg-blue-100 peer-checked:ring-2 ring-blue-500 rounded-xl p-2 transition-all block">⛅</span></label>
+                                <label class="cursor-pointer"><input type="radio" name="input-weather" value="☁️" class="hidden peer"><span class="text-3xl grayscale peer-checked:grayscale-0 peer-checked:bg-blue-100 peer-checked:ring-2 ring-blue-500 rounded-xl p-2 transition-all block">☁️</span></label>
+                                <label class="cursor-pointer"><input type="radio" name="input-weather" value="☂️" class="hidden peer"><span class="text-3xl grayscale peer-checked:grayscale-0 peer-checked:bg-blue-100 peer-checked:ring-2 ring-blue-500 rounded-xl p-2 transition-all block">☂️</span></label>
+                            </div>
+                        </div>
+                        <div class="bg-red-50 p-4 rounded-xl border-2 border-red-100 text-center shadow-inner">
+                            <label class="block text-xs font-black text-red-600 mb-2 uppercase tracking-tighter text-center">WBGT計 実測値 (℃)</label>
+                            <input type="number" step="0.1" id="input-wbgt" required class="w-full bg-white rounded-lg p-4 font-black text-5xl text-center text-red-600 shadow-sm focus:ring-4 outline-none text-center" placeholder="00.0">
+                        </div>
+                        <div class="grid grid-cols-2 gap-3 text-center">
+                            <input type="number" step="0.1" id="input-temp" class="border-2 border-gray-100 rounded-lg p-3 text-center font-bold text-center" placeholder="気温℃">
+                            <input type="number" step="0.1" id="input-humidity" class="border-2 border-gray-100 rounded-lg p-3 text-center font-bold text-center" placeholder="湿度%">
+                        </div>
+                        <button type="submit" class="w-full bg-blue-600 text-white font-black py-4 rounded-xl shadow-xl active:scale-95 transition-all text-xl mt-4 text-center">掲示板に保存</button>
+                    </form>
+                </div>
+                <div class="md:col-span-2 bg-white rounded-lg shadow overflow-hidden flex flex-col h-[500px] md:h-auto md:min-h-[600px]">
+                    <div class="p-4 border-b flex justify-between items-center bg-gray-50 shrink-0 text-center text-left">
+                        <h2 class="font-black text-gray-700 flex items-center gap-2 text-center"><i data-lucide="history" class="w-4 h-4 text-center"></i><span id="input-table-title" class="text-center"></span> の履歴</h2>
+                        <button onclick="clearAllData()" class="text-xs text-red-600 border-2 border-red-200 bg-white px-3 py-1.5 rounded-lg font-bold hover:bg-red-50 text-center">全データ消去</button>
+                    </div>
+                    <div class="overflow-y-auto flex-grow px-2 text-center">
+                        <table class="w-full text-xs text-left border-collapse text-center">
+                            <thead class="sticky top-0 bg-white z-10 text-center">
+                                <tr>
+                                    <th class="p-3 border-b font-black text-gray-400 text-center">区分</th>
+                                    <th class="p-3 border-b font-black text-gray-400 text-center">日時</th>
+                                    <th class="p-3 border-b font-black text-gray-400 text-center">天気</th>
+                                    <th class="p-3 border-b font-black text-gray-400 text-center">指数</th>
+                                    <th class="p-3 border-b font-black text-gray-400 text-center">気温</th>
+                                    <th class="p-3 border-b font-black text-gray-400 text-center">湿度</th>
+                                    <th class="p-3 border-b text-right font-black text-gray-400 text-center">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="input-tbody" class="divide-y divide-gray-50 text-center"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="custom-alert" class="hidden fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[200] px-4 text-center">
+            <div class="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm border-t-8 border-red-500 text-center animate-in zoom-in duration-200">
+                <p id="custom-alert-msg" class="mb-6 font-black text-gray-800 whitespace-pre-wrap text-lg leading-snug text-center"></p>
+                <button id="custom-alert-btn" class="bg-gray-800 text-white font-black py-4 rounded-xl w-full text-lg shadow-lg active:scale-95 transition-transform text-center">OK</button>
+            </div>
+        </div>
+        <div id="custom-confirm" class="hidden fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[200] px-4 text-center">
+            <div class="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm border-t-8 border-yellow-500 text-center animate-in zoom-in duration-200">
+                <p id="custom-confirm-msg" class="mb-6 font-black text-gray-800 whitespace-pre-wrap text-lg leading-snug text-center"></p>
+                <div class="flex gap-3 text-center">
+                    <button id="custom-confirm-cancel" class="bg-gray-100 text-gray-600 py-4 rounded-xl w-1/2 font-black active:scale-95 transition-transform text-center">中止</button>
+                    <button id="custom-confirm-ok" class="bg-red-600 text-white py-4 rounded-xl w-1/2 font-black shadow-lg active:scale-95 transition-transform text-center">実行</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="bg-gray-200 text-center py-2 text-xs font-bold text-gray-500 shrink-0 border-t border-gray-300 z-50 relative">
+        ©2026　ＩＣＴ支援の杜　暑さ指数掲示板
+    </footer>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Canvas Environment Constraints implementation
+        const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+        let db, auth, appId;
+
+        if (firebaseConfigStr) {
+            const firebaseConfig = JSON.parse(firebaseConfigStr);
+            const app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+            appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            window.dbInstance = db;
+            window.appIdInstance = appId;
+        }
+
+        let appState = { records: [], boardDate: new Date(), user: null, isUnlocked: false, passcode: "1234", currentLocation: "校庭", locationConfig: null, locationConfigLoaded: false };
+
+        const getGuidance = v => {
+            const val = parseFloat(v);
+            if (isNaN(val)) return { text: '-', class: 'bg-gray-100' };
+            if (val >= 31) return { text: '危険', class: 'bg-danger' };
+            if (val >= 28) return { text: '厳重警戒', class: 'bg-severe' };
+            if (val >= 25) return { text: '警戒', class: 'bg-warning' };
+            if (val >= 21) return { text: '注意', class: 'bg-caution' };
+            return { text: 'ほぼ安全', class: 'bg-safe' };
+        };
+
+        const showAlertAsync = msg => new Promise(res => {
+            const m = document.getElementById('custom-alert'), e = document.getElementById('custom-alert-msg'), b = document.getElementById('custom-alert-btn');
+            if(!m || !e) return res();
+            e.textContent = msg; m.classList.remove('hidden'); b.onclick = () => { m.classList.add('hidden'); res(); };
+        });
+
+        const showConfirmAsync = msg => new Promise(res => {
+            const m = document.getElementById('custom-confirm'), e = document.getElementById('custom-confirm-msg');
+            if(!m || !e) return res(false);
+            e.textContent = msg; m.classList.remove('hidden');
+            document.getElementById('custom-confirm-ok').onclick = () => { m.classList.add('hidden'); res(true); };
+            document.getElementById('custom-confirm-cancel').onclick = () => { m.classList.add('hidden'); res(false); };
+        });
+
+        const formatDateStr = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+        window.renderBoard = () => {
+            const dStr = formatDateStr(appState.boardDate), now = new Date();
+            const nowISO = `${formatDateStr(now)}T${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+            const display = document.getElementById('board-date-display');
+            if(display) display.textContent = `${appState.boardDate.getFullYear()}年${appState.boardDate.getMonth()+1}月${appState.boardDate.getDate()}日`;
+            
+            const filteredRecords = appState.records.filter(r => {
+                const hour = parseInt(r.time.split(':')[0]);
+                return r.date === dStr && hour >= 8 && hour <= 17 && (r.location === appState.currentLocation || (!r.location && appState.currentLocation === "校庭"));
+            });
+
+            // 防波堤：描画時の重複排除ロジック
+            const apiMap = new Map();
+            const actualRows = [];
+            filteredRecords.forEach(r => {
+                if (r.source === 'API') {
+                    // 同一時刻のAPIデータは1つに集約（過去に保存されたNOW_API等のゴミデータ対策）
+                    apiMap.set(r.time, r);
+                } else {
+                    // 実測値は分単位で複数存在する可能性があるため保持
+                    actualRows.push(r);
+                }
+            });
+
+            const rows = [...Array.from(apiMap.values()), ...actualRows].sort((a,b) => a.time.localeCompare(b.time));
+
+            const container = document.getElementById('board-data-viewport');
+            if(!container) return;
+            container.innerHTML = rows.length ? '' : `<div class="flex-grow flex items-center justify-center text-gray-300 font-black text-xl text-center">データなし</div>`;
+            rows.forEach(r => {
+                const g = getGuidance(r.wbgt);
+                const badge = r.source === 'ACTUAL' ? '<span class="badge-actual">現場実測</span>' : (`${r.date}T${r.time}` < nowISO ? '<span class="badge-api-past">API推定</span>' : '<span class="badge-api-future">API予報</span>');
+                
+                const col = document.createElement('div');
+                col.className = "data-column shadow-sm shrink-0 text-center";
+                col.innerHTML = `
+                    <div class="cell flex-row-type text-center">${badge}</div>
+                    <div class="cell flex-row-main cell-time text-center">${r.time}</div>
+                    <div class="cell flex-row-main text-4xl text-center">${r.weather || '☁️'}</div>
+                    <div class="cell flex-row-main cell-wbgt ${parseFloat(r.wbgt)>=28?'text-red-600':''} text-center">${r.wbgt}</div>
+                    <div class="cell flex-row-main cell-guidance ${g.class} text-center">${g.text}</div>
+                    <div class="cell flex-row-main font-black text-gray-600 text-2xl text-center">${r.temp||'--'}</div>
+                    <div class="cell flex-row-main font-black text-gray-600 text-2xl text-center border-b-0">${r.humidity||'--'}</div>
+                `;
+                container.appendChild(col);
+            });
+        };
+
+        window.renderInputTable = () => {
+            const tb = document.getElementById('input-tbody'); if(!tb) return;
+            tb.innerHTML = '';
+            const filtered = [...appState.records]
+                .filter(r => (r.location === appState.currentLocation || (!r.location && appState.currentLocation === "校庭")))
+                .sort((a,b) => new Date(`${a.date}T${a.time}`) - new Date(`${b.date}T${b.time}`));
+            filtered.forEach(r => {
+                const b = (r.source === 'API') ? '<span class="badge-api-past">API</span>' : '<span class="badge-actual">実測</span>';
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td class="p-3 border-b text-center">${b}</td><td class="p-3 border-b font-bold text-center">${r.date.substring(5)} ${r.time}</td><td class="p-3 border-b text-xl text-center">${r.weather || '☁️'}</td><td class="p-3 border-b font-black text-xl text-center">${r.wbgt}</td><td class="p-3 border-b font-bold text-gray-600 text-center">${r.temp || '--'}℃</td><td class="p-3 border-b font-bold text-gray-600 text-center">${r.humidity || '--'}%</td><td class="p-3 border-b text-right text-center"><button class="text-red-500 delete-btn p-2 rounded-lg hover:bg-red-50" data-id="${r.id}"><i data-lucide="trash-2" class="w-4 h-4"></i></button></td>`;
+                tb.appendChild(tr);
+            });
+            document.querySelectorAll('.delete-btn').forEach(btn => btn.onclick = () => deleteRecord(btn.dataset.id));
+            const fTitle = document.getElementById('input-form-title'), tTitle = document.getElementById('input-table-title');
+            if(fTitle) fTitle.textContent = appState.currentLocation;
+            if(tTitle) tTitle.textContent = appState.currentLocation;
+            lucide.createIcons();
+        };
+
+        window.switchGlobalLocation = loc => {
+            appState.currentLocation = loc;
+            const btnKoutei = document.getElementById('header-loc-校庭'), btnTaiikukan = document.getElementById('header-loc-体育館');
+            if(btnKoutei) btnKoutei.className = (loc === '校庭') ? 'py-1.5 px-3 md:px-5 rounded flex items-center gap-1.5 text-sm md:text-base transition-all loc-active' : 'py-1.5 px-3 md:px-5 rounded flex items-center gap-1.5 text-sm md:text-base transition-all loc-inactive';
+            if(btnTaiikukan) btnTaiikukan.className = (loc === '体育館') ? 'py-1.5 px-3 md:px-5 rounded flex items-center gap-1.5 text-sm md:text-base transition-all loc-active' : 'py-1.5 px-3 md:px-5 rounded flex items-center gap-1.5 text-sm md:text-base transition-all loc-inactive';
+            renderBoard(); if(appState.isUnlocked) renderInputTable();
+            lucide.createIcons();
+        };
+
+        window.switchTab = tab => {
+            const tabs = ['board', 'api', 'input'], views = { board: document.getElementById('view-board'), api: document.getElementById('view-api'), input: document.getElementById('view-input'), auth: document.getElementById('view-auth') };
+            tabs.forEach(t => { const btn = document.getElementById(`tab-${t}`); if(btn) btn.className = (t === tab) ? 'tab-active px-3 md:px-5 py-1.5 text-sm md:text-base font-bold border rounded transition-all shadow-inner' : 'tab-inactive px-3 md:px-5 py-1.5 text-sm md:text-base font-bold border rounded transition-all'; });
+            Object.values(views).filter(v => v).forEach(v => v.classList.add('hidden'));
+            if (tab === 'board') { views.board?.classList.remove('hidden'); renderBoard(); } 
+            else if (!appState.isUnlocked) { views.auth?.classList.remove('hidden'); }
+            else { views[tab]?.classList.remove('hidden'); if(tab==='input') renderInputTable(); }
+            lucide.createIcons();
+        };
+
+        window.resetBoardDateToToday = () => { appState.boardDate = new Date(); renderBoard(); };
+
+        window.runInitialRouting = () => {
+            if (appState.locationConfig) {
+                document.getElementById('api-fetch-date').value = formatDateStr(new Date());
+                fetchWeatherData(true);
+                switchTab('board');
+            } else {
+                switchTab('api');
+                showAlertAsync("「拠点設定」から基準地点を登録してください。");
+            }
+        };
+
+        async function initAuthAndData() {
+            if (!auth || !db) return;
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, user => {
+                    if (user) { 
+                        appState.user = user;
+                        onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'wbgtRecords'), snap => {
+                            const data = []; snap.forEach(d => data.push(d.data()));
+                            appState.records = data.sort((a,b) => new Date(`${b.date}T${b.time}`) - new Date(`${a.date}T${a.time}`));
+                            renderBoard(); if(appState.isUnlocked) renderInputTable();
+                        }, (error) => { console.error("Firestore Listen Error:", error); });
+
+                        onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'appSettings', 'locationConfig'), d => {
+                            const isFirstLoad = !appState.locationConfigLoaded;
+                            appState.locationConfigLoaded = true;
+                            if(d.exists()) { appState.locationConfig = d.data(); updateLocationUI(); } else { appState.locationConfig = null; updateLocationUI(); }
+                            
+                            if(isFirstLoad && localStorage.getItem('wbgt_terms_accepted_date') === formatDateStr(new Date())) {
+                                runInitialRouting();
+                            }
+                        }, (error) => { console.error("Firestore Listen Error:", error); });
+                    }
+                });
+            } catch (e) {
+                console.error("Auth/Data Init Error:", e);
+            }
+        }
+
+        window.verifyPasscode = () => {
+            const input = document.getElementById('passcode-input'), errorMsg = document.getElementById('auth-error');
+            if(!input) return;
+            if(input.value.trim() === appState.passcode){ appState.isUnlocked = true; input.value = ''; errorMsg?.classList.add('hidden'); switchTab('api'); } 
+            else { errorMsg?.classList.remove('hidden'); input.value = ''; input.focus(); }
+        };
+
+        window.lockEditor = () => { appState.isUnlocked = false; switchTab('board'); };
+        window.changeBoardDate = d => { appState.boardDate.setDate(appState.boardDate.getDate()+d); renderBoard(); };
+
+        function updateLocationUI() {
+            const display = document.getElementById('api-target-display'), btnFetch = document.getElementById('btn-fetch');
+            if(appState.locationConfig) { 
+                if(display) display.textContent = `${appState.locationConfig.pref} ${appState.locationConfig.city}`; 
+                if(btnFetch) btnFetch.disabled = false; 
+                hideLocationEditor(); 
+            } else { 
+                if(display) display.textContent = "拠点未設定"; 
+                if(btnFetch) btnFetch.disabled = true; 
+                showLocationEditor(); 
+            }
+        }
+
+        window.showLocationEditor = () => { document.getElementById('api-location-editor')?.classList.remove('hidden'); };
+        window.hideLocationEditor = () => { if(appState.locationConfig) document.getElementById('api-location-editor')?.classList.add('hidden'); };
+
+        window.registerNewLocation = async () => {
+            const pref = document.getElementById('api-pref').value, city = document.getElementById('api-city').value, lat = document.getElementById('api-lat').value, lon = document.getElementById('api-lon').value;
+            if(!lat || !lon) return showAlertAsync("地点が特定できていません");
+            const config = { pref, city, lat, lon };
+            if(window.dbInstance) {
+                try {
+                    await setDoc(doc(window.dbInstance, 'artifacts', window.appIdInstance, 'public', 'data', 'appSettings', 'locationConfig'), config);
+                } catch(e) { console.error("Save config failed:", e); return; }
+            }
+            appState.locationConfig = config; updateLocationUI(); 
+            await showAlertAsync("拠点を設定しました。最新の予報を取得し掲示板に反映します。"); 
+            fetchWeatherData(true);
+        };
+
+        window.fetchWeatherData = async (isAuto = false) => {
+            if(!appState.locationConfig) return;
+            const { lat, lon } = appState.locationConfig, targetDateStr = document.getElementById('api-fetch-date').value;
+            if(!targetDateStr) return;
+
+            if(!isAuto) {
+                document.getElementById('api-result-area')?.classList.add('hidden');
+                const b = document.getElementById('btn-fetch'); if(b) { b.disabled = true; b.textContent = "取得中..."; }
+            }
+
+            try {
+                // 変更：日本の気象庁モデル(jma_seamless)を明示的に指定し、精度を向上
+                const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,relative_humidity_2m,weather_code&start_date=${targetDateStr}&end_date=${targetDateStr}&timezone=Asia%2FTokyo&models=jma_seamless`);
+                if(!r.ok) throw new Error();
+                const d = await r.json(); 
+                
+                let fetchedDataList = [];
+                if(d.hourly && d.hourly.time) {
+                    d.hourly.time.forEach((tStr, idx) => {
+                        const parts = tStr.split('T');
+                        const h = parseInt(parts[1].split(':')[0]);
+                        if (h >= 8 && h <= 17) {
+                            const t = d.hourly.temperature_2m[idx];
+                            const hum = d.hourly.relative_humidity_2m[idx];
+                            const wc = d.hourly.weather_code[idx];
+                            
+                            // 変更：欠損データ(null)が含まれる時間帯を完全に弾く
+                            if (t === null || hum === null) return;
+
+                            let fw = (wc===0) ? "☀️" : (wc<=3) ? "⛅" : (wc>=51 && wc<=67) ? "☂️" : "☁️";
+                            const wbgt = (0.725 * t + 0.0368 * hum + 0.00364 * t * hum - 3.246).toFixed(1);
+                            fetchedDataList.push({ date: parts[0], time: `${String(h).padStart(2,'0')}:00`, weather: fw, wbgt, temp: t.toFixed(1), humidity: hum.toString(), source: 'API' });
+                        }
+                    });
+                }
+                
+                document.getElementById('api-result-area')?.classList.remove('hidden');
+
+                if(window.dbInstance) {
+                    const batch = writeBatch(window.dbInstance);
+                    const loc = appState.currentLocation;
+                    fetchedDataList.forEach(f => {
+                        const id = `${f.date}_${f.time}_${loc}_API`;
+                        batch.set(doc(window.dbInstance, 'artifacts', window.appIdInstance, 'public', 'data', 'wbgtRecords', id), { ...f, location: loc, id });
+                    });
+                    
+                    await batch.commit();
+                }
+
+                if(!isAuto) {
+                    appState.boardDate = new Date(targetDateStr);
+                    await showAlertAsync("予報を取得し、掲示板に自動反映しました。");
+                    switchTab('board');
+                }
+
+            } catch(e) { 
+                if(!isAuto) await showAlertAsync("予測データの取得に失敗しました。"); 
+            } finally { 
+                if(!isAuto) {
+                    const b = document.getElementById('btn-fetch'); 
+                    if(b) { b.disabled = false; b.textContent = "予報を取得"; lucide.createIcons(); } 
+                }
+            }
+        };
+
+        window.handleFormSubmit = async e => {
+            e.preventDefault();
+            const weatherVal = document.querySelector('input[name="input-weather"]:checked')?.value || "☁️";
+            const rec = { id: Date.now().toString(), date: document.getElementById('input-date').value, time: `${document.getElementById('input-hour').value}:${document.getElementById('input-minute').value}`, weather: weatherVal, wbgt: document.getElementById('input-wbgt').value, temp: document.getElementById('input-temp').value, humidity: document.getElementById('input-humidity').value, location: appState.currentLocation, source: 'ACTUAL' };
+            if (window.dbInstance) {
+                try {
+                    await setDoc(doc(window.dbInstance, 'artifacts', window.appIdInstance, 'public', 'data', 'wbgtRecords', rec.id), rec); 
+                    await showAlertAsync("保存しました");
+                } catch(err) { console.error("Save failed:", err); await showAlertAsync("保存に失敗しました"); }
+            }
+        };
+
+        window.deleteRecord = async id => { if(await showConfirmAsync("削除しますか？")) { if (window.dbInstance) await deleteDoc(doc(window.dbInstance, 'artifacts', window.appIdInstance, 'public', 'data', 'wbgtRecords', id)); } };
+        window.clearAllData = async () => { if(await showConfirmAsync("全消去しますか？")) { if (window.dbInstance) { const s = await getDocs(collection(window.dbInstance, 'artifacts', window.appIdInstance, 'public', 'data', 'wbgtRecords')); for (const d of s.docs) await deleteDoc(d.ref); } } };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const todayStr = formatDateStr(new Date());
+            
+            window.acceptTerms = () => {
+                localStorage.setItem('wbgt_terms_accepted_date', todayStr);
+                const modal = document.getElementById('terms-modal');
+                if (modal) modal.classList.add('hidden');
+                if (appState.locationConfigLoaded) runInitialRouting();
+            };
+
+            if (localStorage.getItem('wbgt_terms_accepted_date') !== todayStr) {
+                const modal = document.getElementById('terms-modal');
+                if (modal) modal.classList.remove('hidden');
+            }
+
+            const now = new Date(), h = document.getElementById('input-hour'), m = document.getElementById('input-minute');
+            if(h && m) { 
+                for(let i=8;i<=17;i++) h.add(new Option(String(i).padStart(2,'0'), String(i).padStart(2,'0'))); 
+                for(let i=0;i<60;i+=5) m.add(new Option(String(i).padStart(2,'0'), String(i).padStart(2,'0'))); 
+                document.getElementById('input-date').value = formatDateStr(now); 
+                
+                let currentH = now.getHours();
+                if(currentH < 8) currentH = 8; else if(currentH > 17) currentH = 17;
+                h.value = String(currentH).padStart(2,'0');
+                m.value = String(Math.floor(now.getMinutes()/5)*5).padStart(2,'0');
+            }
+            const apiDateInp = document.getElementById('api-fetch-date'); if(apiDateInp) apiDateInp.value = formatDateStr(now);
+            const ps = ["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"];
+            const pSel = document.getElementById('api-pref'); if(pSel) { pSel.add(new Option("都道府県を選択", "")); ps.forEach(p => pSel.add(new Option(p,p))); pSel.value = ""; }
+            const cSel = document.getElementById('api-city'); if(cSel) { cSel.innerHTML = '<option value="">都道府県を先に選択してください</option>'; }
+            renderBoard(); lucide.createIcons(); initAuthAndData();
+            setInterval(() => { if(!document.getElementById('view-board')?.classList.contains('hidden')) renderBoard(); }, 60000);
+        });
+
+        window.loadCities = async (pref, def) => {
+            const p = pref || document.getElementById('api-pref').value, c = document.getElementById('api-city');
+            if(!c) return;
+            if(!p) { c.innerHTML = '<option value="">都道府県を先に選択してください</option>'; c.disabled = true; return; }
+            c.innerHTML = '<option>読込中...</option>'; c.disabled = true;
+            try {
+                const r = await fetch(`https://geoapi.heartrails.com/api/json?method=getCities&prefecture=${encodeURIComponent(p)}`);
+                const d = await r.json(); c.innerHTML = '<option value="">市区町村を選択</option>';
+                if(d.response && d.response.location) { d.response.location.forEach(l => { const o = new Option(l.city, l.city); if(l.city===def) o.selected=true; c.add(o); }); c.disabled = false; updateCoordinates(); }
+            } catch(e) { }
+        };
+
+        window.updateCoordinates = async () => {
+            const p = document.getElementById('api-pref').value, c = document.getElementById('api-city').value, b = document.getElementById('btn-register-loc');
+            if(!p || !c || !b) return; 
+            b.disabled = true; b.textContent = "地点特定中...";
+            try {
+                let r1 = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(c)}&count=1&language=ja&format=json`);
+                let d1 = await r1.json();
+                if(d1.results && d1.results[0]){
+                    document.getElementById('api-lat').value = d1.results[0].latitude; document.getElementById('api-lon').value = d1.results[0].longitude;
+                    b.disabled = false; b.textContent = "地点を保存して完了"; return;
+                }
+                const r2 = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(p + c)}&limit=1&accept-language=ja`);
+                const d2 = await r2.json();
+                if(d2 && d2[0]){
+                    document.getElementById('api-lat').value = d2[0].lat; document.getElementById('api-lon').value = d2[0].lon;
+                    b.disabled = false; b.textContent = "地点を保存して完了";
+                } else { b.textContent = "地点特定不可"; }
+            } catch(e) { b.textContent = "地点特定不可"; }
+        };
+    </script>
+</body>
+</html>
