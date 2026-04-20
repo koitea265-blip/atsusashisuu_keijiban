@@ -29,7 +29,6 @@
 
         .badge-api-future { background-color: #94a3b8; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; }
         .badge-api-past { background-color: #64748b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; }
-        /* 動的付与のため背景色と文字色を削除 */
         .badge-actual { padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 900; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
         
         .board-fixed-height { flex-grow: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -37,7 +36,6 @@
         .header-column { width: 120px; background: #1f2937; color: white; flex-shrink: 0; display: flex; flex-direction: column; }
         .data-viewport { flex-grow: 1; overflow-x: auto; display: flex; }
         
-        /* 動的付与のためボーダー定義を外す */
         .data-column { min-width: 150px; display: flex; flex-direction: column; }
         
         .cell { display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #e5e7eb; padding: 2px; text-align: center; }
@@ -128,6 +126,12 @@
 
     <main class="flex-grow p-2 md:p-4 max-w-full mx-auto w-full relative overflow-hidden flex flex-col">
 
+        <!-- 追加：初期ロード時のチラつきや不自然な遷移を防ぐローディング画面 -->
+        <div id="view-loading" class="flex flex-col items-center justify-center h-full text-blue-600 animate-pulse">
+            <i data-lucide="loader-2" class="w-12 h-12 animate-spin mb-4"></i>
+            <p class="font-black text-lg">システムを初期化中...</p>
+        </div>
+
         <div id="view-auth" class="hidden flex flex-col items-center justify-center h-full bg-white rounded-lg shadow-md border-t-4 border-red-500 py-10 text-center">
             <i data-lucide="shield-alert" class="w-12 h-12 text-red-500 mb-4 mx-auto"></i>
             <h2 class="text-xl font-bold mb-6 text-gray-800">管理ロック解除</h2>
@@ -138,7 +142,8 @@
             </div>
         </div>
 
-        <div id="view-board" class="space-y-3 h-full animate-in fade-in duration-300 flex flex-col">
+        <!-- 初期状態をhiddenに変更 -->
+        <div id="view-board" class="hidden space-y-3 h-full animate-in fade-in duration-300 flex flex-col">
             <div class="flex items-center justify-between bg-white px-4 py-2 rounded-lg shadow-sm border shrink-0">
                 <button onclick="changeBoardDate(-1)" class="p-1 hover:bg-gray-100 rounded-full transition-colors text-gray-600"><i data-lucide="chevron-left" class="w-6 h-6"></i></button>
                 <div class="flex items-center gap-4 text-center mx-auto">
@@ -478,9 +483,11 @@
         };
 
         window.switchTab = tab => {
-            const tabs = ['board', 'api', 'input'], views = { board: document.getElementById('view-board'), api: document.getElementById('view-api'), input: document.getElementById('view-input'), auth: document.getElementById('view-auth') };
+            const tabs = ['board', 'api', 'input'];
+            const views = { board: document.getElementById('view-board'), api: document.getElementById('view-api'), input: document.getElementById('view-input'), auth: document.getElementById('view-auth'), loading: document.getElementById('view-loading') };
             tabs.forEach(t => { const btn = document.getElementById(`tab-${t}`); if(btn) btn.className = (t === tab) ? 'tab-active px-3 md:px-5 py-1.5 text-sm md:text-base font-bold border rounded transition-all shadow-inner' : 'tab-inactive px-3 md:px-5 py-1.5 text-sm md:text-base font-bold border rounded transition-all'; });
             Object.values(views).filter(v => v).forEach(v => v.classList.add('hidden'));
+            
             if (tab === 'board') { views.board?.classList.remove('hidden'); renderBoard(); } 
             else if (!appState.isUnlocked) { views.auth?.classList.remove('hidden'); }
             else { views[tab]?.classList.remove('hidden'); if(tab==='input') renderInputTable(); }
@@ -495,7 +502,6 @@
                 fetchWeatherData(true);
                 switchTab('board');
             } else {
-                // 変更：初期セットアップ特例。拠点未設定時は強制的にロックを解除し設定画面へ誘導する
                 appState.isUnlocked = true;
                 switchTab('api');
                 showAlertAsync("【初期セットアップ】\n「拠点設定」から基準地点を登録してください。");
@@ -587,7 +593,6 @@
             }
 
             try {
-                // 変更：日本の気象庁モデル(jma_seamless)を明示的に指定し、精度を向上
                 const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,relative_humidity_2m,weather_code&start_date=${targetDateStr}&end_date=${targetDateStr}&timezone=Asia%2FTokyo&models=jma_seamless`);
                 if(!r.ok) throw new Error();
                 const d = await r.json(); 
@@ -602,7 +607,6 @@
                             const hum = d.hourly.relative_humidity_2m[idx];
                             const wc = d.hourly.weather_code[idx];
                             
-                            // 変更：欠損データ(null)が含まれる時間帯を完全に弾く
                             if (t === null || hum === null) return;
 
                             let fw = (wc===0) ? "☀️" : (wc<=3) ? "⛅" : (wc>=51 && wc<=67) ? "☂️" : "☁️";
@@ -683,7 +687,7 @@
                 m.value = String(Math.floor(now.getMinutes()/5)*5).padStart(2,'0');
             }
             const apiDateInp = document.getElementById('api-fetch-date'); if(apiDateInp) apiDateInp.value = formatDateStr(now);
-            const ps = ["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群 মাতৃ","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"];
+            const ps = ["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"];
             const pSel = document.getElementById('api-pref'); if(pSel) { pSel.add(new Option("都道府県を選択", "")); ps.forEach(p => pSel.add(new Option(p,p))); pSel.value = ""; }
             const cSel = document.getElementById('api-city'); if(cSel) { cSel.innerHTML = '<option value="">都道府県を先に選択してください</option>'; }
             renderBoard(); lucide.createIcons(); initAuthAndData();
