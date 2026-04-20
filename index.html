@@ -29,14 +29,16 @@
 
         .badge-api-future { background-color: #94a3b8; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; }
         .badge-api-past { background-color: #64748b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; }
-        .badge-actual { background-color: #2563eb; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
+        /* 動的付与のため背景色と文字色を削除 */
+        .badge-actual { padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 900; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
         
-        /* 変更：ハードコードを廃止し、Flexboxによる可変高さに依存させる */
         .board-fixed-height { flex-grow: 1; min-height: 0; display: flex; flex-direction: column; }
         .board-container { display: flex; height: 100%; background: white; border: 4px solid #1f2937; border-radius: 12px; overflow: hidden; }
         .header-column { width: 120px; background: #1f2937; color: white; flex-shrink: 0; display: flex; flex-direction: column; }
         .data-viewport { flex-grow: 1; overflow-x: auto; display: flex; }
-        .data-column { min-width: 150px; border-right: 2px solid #e5e7eb; display: flex; flex-direction: column; }
+        
+        /* 動的付与のためボーダー定義を外す */
+        .data-column { min-width: 150px; display: flex; flex-direction: column; }
         
         .cell { display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #e5e7eb; padding: 2px; text-align: center; }
         .header-cell { display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #374151; font-weight: 900; font-size: 1.1rem; background: #374151; text-align: center; }
@@ -48,7 +50,6 @@
         .cell-guidance { font-size: 1.3rem; font-weight: 900; line-height: 1.2; }
         .cell-time { font-size: 1.6rem; font-weight: 900; }
 
-        /* 変更：高さを親コンテナ（main）に追従させ、内部でのみスクロールを許可 */
         .scrollable-view { height: 100%; overflow-y: auto; padding-bottom: 20px; }
         .forecast-scroll::-webkit-scrollbar { height: 6px; }
         .forecast-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
@@ -125,7 +126,6 @@
         </div>
     </header>
 
-    <!-- 変更：親コンテナ(main)をoverflow-hiddenにし、子要素(各ビュー)にスクロールを委譲する -->
     <main class="flex-grow p-2 md:p-4 max-w-full mx-auto w-full relative overflow-hidden flex flex-col">
 
         <div id="view-auth" class="hidden flex flex-col items-center justify-center h-full bg-white rounded-lg shadow-md border-t-4 border-red-500 py-10 text-center">
@@ -383,19 +383,67 @@
             if(!container) return;
             container.innerHTML = rows.length ? '' : `<div class="flex-grow flex items-center justify-center text-gray-300 font-black text-xl text-center">データなし</div>`;
             rows.forEach(r => {
+                const isActual = r.source === 'ACTUAL';
+                const val = parseFloat(r.wbgt);
                 const g = getGuidance(r.wbgt);
-                const badge = r.source === 'ACTUAL' ? '<span class="badge-actual">現場実測</span>' : (`${r.date}T${r.time}` < nowISO ? '<span class="badge-api-past">API推定</span>' : '<span class="badge-api-future">API予報</span>');
+                
+                let colClass = 'bg-gray-50 border-r-2 border-gray-200';
+                let borderBottomClass = '';
+                let timeColorClass = 'text-gray-500';
+                let tempHumColorClass = 'text-gray-400';
+                let badgeStyle = '';
+                let wbgtColor = 'text-gray-500';
+
+                if (isActual) {
+                    if (val >= 31) {
+                        colClass = 'bg-red-50 border-4 border-red-600 shadow-xl z-10 relative';
+                        borderBottomClass = 'border-b-red-200';
+                        timeColorClass = 'text-red-900';
+                        badgeStyle = 'bg-red-600 text-white';
+                        wbgtColor = 'text-red-700';
+                    } else if (val >= 28) {
+                        colClass = 'bg-orange-50 border-4 border-orange-500 shadow-xl z-10 relative';
+                        borderBottomClass = 'border-b-orange-200';
+                        timeColorClass = 'text-orange-900';
+                        badgeStyle = 'bg-orange-500 text-black';
+                        wbgtColor = 'text-orange-700';
+                    } else if (val >= 25) {
+                        colClass = 'bg-yellow-50 border-4 border-yellow-400 shadow-xl z-10 relative';
+                        borderBottomClass = 'border-b-yellow-200';
+                        timeColorClass = 'text-yellow-900';
+                        badgeStyle = 'bg-yellow-400 text-black';
+                        wbgtColor = 'text-gray-900';
+                    } else if (val >= 21) {
+                        colClass = 'bg-lime-50 border-4 border-lime-400 shadow-xl z-10 relative';
+                        borderBottomClass = 'border-b-lime-200';
+                        timeColorClass = 'text-lime-900';
+                        badgeStyle = 'bg-lime-400 text-black';
+                        wbgtColor = 'text-gray-900';
+                    } else {
+                        colClass = 'bg-cyan-50 border-4 border-cyan-400 shadow-xl z-10 relative';
+                        borderBottomClass = 'border-b-cyan-200';
+                        timeColorClass = 'text-cyan-900';
+                        badgeStyle = 'bg-cyan-400 text-black';
+                        wbgtColor = 'text-gray-900';
+                    }
+                    tempHumColorClass = 'text-gray-700';
+                } else {
+                    wbgtColor = val >= 28 ? 'text-red-500' : 'text-gray-500';
+                }
+                
+                const badge = isActual ? `<span class="badge-actual animate-pulse ${badgeStyle}">現場実測</span>` : (`${r.date}T${r.time}` < nowISO ? '<span class="badge-api-past">API推定</span>' : '<span class="badge-api-future">API予報</span>');
                 
                 const col = document.createElement('div');
-                col.className = "data-column shadow-sm shrink-0 text-center";
+                col.className = `data-column shrink-0 text-center transition-all ${colClass}`;
+                
                 col.innerHTML = `
-                    <div class="cell flex-row-type text-center">${badge}</div>
-                    <div class="cell flex-row-main cell-time text-center">${r.time}</div>
-                    <div class="cell flex-row-main text-4xl text-center">${r.weather || '☁️'}</div>
-                    <div class="cell flex-row-main cell-wbgt ${parseFloat(r.wbgt)>=28?'text-red-600':''} text-center">${r.wbgt}</div>
-                    <div class="cell flex-row-main cell-guidance ${g.class} text-center">${g.text}</div>
-                    <div class="cell flex-row-main font-black text-gray-600 text-2xl text-center">${r.temp||'--'}</div>
-                    <div class="cell flex-row-main font-black text-gray-600 text-2xl text-center border-b-0">${r.humidity||'--'}</div>
+                    <div class="cell flex-row-type text-center ${borderBottomClass}">${badge}</div>
+                    <div class="cell flex-row-main cell-time text-center ${borderBottomClass} ${timeColorClass}">${r.time}</div>
+                    <div class="cell flex-row-main text-4xl text-center ${borderBottomClass} ${isActual ? '' : 'opacity-50'}">${r.weather || '☁️'}</div>
+                    <div class="cell flex-row-main cell-wbgt ${wbgtColor} text-center ${borderBottomClass}">${r.wbgt}</div>
+                    <div class="cell flex-row-main cell-guidance ${g.class} text-center ${borderBottomClass} ${isActual ? '' : 'opacity-60'}">${g.text}</div>
+                    <div class="cell flex-row-main font-black text-2xl text-center ${borderBottomClass} ${tempHumColorClass}">${r.temp||'--'}</div>
+                    <div class="cell flex-row-main font-black text-2xl text-center border-b-0 ${tempHumColorClass}">${r.humidity||'--'}</div>
                 `;
                 container.appendChild(col);
             });
